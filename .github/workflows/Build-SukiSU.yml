@@ -194,7 +194,7 @@ jobs:
 
       - name: Make AnyKernel3 # 制作 AnyKernel3
         run: |
-          git clone https://github.com/Kernel-SU/AnyKernel3 --depth=1 && rm -rf ./AnyKernel3-KernelSU-Next/.git
+          git clone https://github.com/schqiushui/AnyKernel3-KernelSU-Next.git --depth=1 && rm -rf ./AnyKernel3-KernelSU-Next/.git
           DIR1="./kernel_workspace/kernel_platform/out/msm-kernel-${{ github.event.inputs.CPUD }}-gki/dist/"
           DIR2="./kernel_workspace/kernel_platform/common/out/arch/arm64/boot/"
           DIR3="./kernel_workspace/kernel_platform/out/msm-${{ github.event.inputs.CPUD }}-${{ github.event.inputs.CPUD }}-gki/dist/"
