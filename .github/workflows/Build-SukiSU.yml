@@ -1,33 +1,34 @@
-name: Build OnePlus_Kernel
+name: Build OnePlus Kernel # 构建一加内核
+
 on:
   workflow_dispatch:
     inputs:
       CPU:
-        description: "分支"
+        description: "Branch to build (要构建的分支)"
         required: true
         default: 'sm8750'
       FEIL:
-        description: "配置文件"
+        description: "Configuration file (配置文件)"
         required: true
         default: 'oneplus_13_v'
       CPUD:
-        description: "处理器代号"
+        description: "Processor code name (处理器代号)"
         required: true
         default: 'sun'
       ANDROID_VERSION:
-        description: "内核安卓版本"
+        description: "Kernel Android version (内核 Android 版本)"
         required: true
         default: 'android15'
       KERNEL_VERSION:
-        description: "内核版本"
+        description: "Kernel version (内核版本)"
         required: true
         default: '6.6'
       KERNEL_NAME:
-        description: "修改内核名称"
+        description: "Kernel name modification (内核名称修改)"
         required: true
         default: '-android15-8-g013ec21bba94-abogki383916444'
       kernelsu_variant:
-        description: "选择 KSU"
+        description: "Select KernelSU variant (选择 KernelSU 变体)"
         required: true
         type: choice
         options:
@@ -35,16 +36,16 @@ on:
           - SukiSU
         default: SukiSU
       kernelsu_version:
-        description: "选择 KSU 版本"
+        description: "Select KernelSU version (选择 KernelSU 版本)"
         required: true
         type: choice
         options:
           - without ksu
-          - tag
-          - main
-        default: tag
+          - dev
+          - stable
+        default: dev
       SUSFS_ENABLED:
-        description: "添加 SUSFS"
+        description: "Enable SUSFS (启用 SUSFS)"
         required: true
         type: choice
         options:
@@ -52,19 +53,19 @@ on:
           - disable
         default: enable
       VFS_patch_ENABLED:
-        description: "添加 vfs 补丁（新钩子）？"
+        description: "Enable VFS patch (add new hooks)? (启用 VFS 补丁（添加新钩子）？)"
         required: true
         type: choice
         options:
           - enable
           - disable
         default: enable
+
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Maximize build space
+      - name: Maximize build space # 最大化构建空间
         uses: easimon/maximize-build-space@master
         with:
           root-reserve-mb: 8192
@@ -75,23 +76,20 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
-      - name: Configure Git
+      - name: Configure Git & Install dependencies # 配置 Git & 安装依赖
         run: |
           git config --global user.name "schqiushui"
           git config --global user.email "orochi9999@gmail.com"
-
-      - name: Install dependencies
-        run: |
           sudo apt update && sudo apt upgrade -y
           sudo apt install -y python3 git curl
 
-      - name: Install repo tool
+      - name: Install repo tool # 安装 repo 工具
         run: |
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/repo
           chmod a+x ~/repo
           sudo mv ~/repo /usr/local/bin/repo
 
-      - name: Initialize repo and sync
+      - name: Initialize repo and sync # 初始化 repo 和同步
         run: |
           mkdir kernel_workspace && cd kernel_workspace
           repo init -u https://github.com/schqiushui/kernel_manifest.git -b refs/heads/oneplus/${{ github.event.inputs.CPU }} -m ${{ github.event.inputs.FEIL }}.xml --depth=1
@@ -102,36 +100,25 @@ jobs:
           sed -i 's/ -dirty//g' kernel_platform/msm-kernel/scripts/setlocalversion
           sed -i 's/ -dirty//g' kernel_platform/external/dtc/scripts/setlocalversion
 
-      - name: KernelSU & SukiSU version
-        if: ${{ github.event.inputs.kernelsu_variant == 'Official' || github.event.inputs.kernelsu_variant == 'SukiSU' }}
-        run: |
-          if [[ "${{ github.event.inputs.kernelsu_version }}" == "tag" ]]; then
-            echo "BRANCH=-" >> $GITHUB_ENV
-          elif [[ "${{ github.event.inputs.kernelsu_version }}" == "main" ]]; then
-            echo "BRANCH=-s susfs-dev" >> $GITHUB_ENV
-          fi
-
-      - name: Add KernelSU-SukiSU
+      - name: KernelSU & SukiSU setup # 配置 KernelSU & SukiSU
         if: ${{ github.event.inputs.kernelsu_variant == 'SukiSU' }}
         run: |
           cd kernel_workspace/kernel_platform
-          curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash ${{ env.BRANCH }}
+          curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/main/kernel/setup.sh" | bash -s susfs-${{ github.event.inputs.kernelsu_version }}
           cd ./KernelSU
           KSU_VERSION=$(expr $(/usr/bin/git rev-list --count main) "+" 10606)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           export KSU_VERSION=$KSU_VERSION
           sed -i "s/DKSU_VERSION=12500/DKSU_VERSION=${KSU_VERSION}/" kernel/Makefile
 
-      - name: Apply SUSFS Patches SukiSU
-        if: ${{ (inputs.kernelsu_variant == 'SukiSU') && github.event.inputs.SUSFS_ENABLED == 'enable' }}
+      - name: Apply SUSFS & Hide patches # 应用 SUSFS & 隐藏补丁
+        if: ${{ inputs.kernelsu_variant == 'SukiSU' && github.event.inputs.SUSFS_ENABLED == 'enable' }}
         run: |
           cd kernel_workspace
           git clone https://github.com/ShirkNeko/SukiSU_patch.git
           git clone https://github.com/schqiushui/susfs4ksu.git -b gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}
           if [[ "${{ github.event.inputs.KERNEL_VERSION }}" == "6.1" ]]; then
-            cd susfs4ksu
-            git reset --hard HEAD~1
-            cd ..
+            cd susfs4ksu && git reset --hard HEAD~1 && cd ..
           fi
           cd kernel_platform
 
@@ -145,44 +132,28 @@ jobs:
           patch -p1 < 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch || true
           echo "完成"
 
-      - name: Apply Hide Stuff Patches
-        if: ${{ github.event.inputs.SUSFS_ENABLED == 'enable' }}
-        run: |
-          cd kernel_workspace/kernel_platform/common
           cp ../../SukiSU_patch/69_hide_stuff.patch ./
           echo "正在打隐藏应用补丁"
           patch -p1 -F 3 < 69_hide_stuff.patch
 
-      - name: Apply New Hooks Patches
+      - name: Apply New Hooks patches # 应用新的钩子补丁
         if: ${{ github.event.inputs.VFS_patch_ENABLED == 'enable' }}
         run: |
+          git clone https://github.com/ShirkNeko/SukiSU_patch.git
           cd kernel_workspace/kernel_platform/common
           cp ../../SukiSU_patch/hooks/new_hooks.patch ./
           echo "正在打vfs补丁"
           patch -p1 -F 3 < new_hooks.patch
           echo "完成"
 
-          #if [ "${{ github.event.inputs.KERNEL_VERSION }}" != "5.10" ]; then
-          #  cp ../../SukiSU_patch/other/lz4k_patch/${{ github.event.inputs.KERNEL_VERSION }}/lz4kd.patch ./
-          #  patch -p1 -F 3 < lz4kd.patch || true
-          #fi
-
-      - name: Add SUSFS Configuration Settings
+      - name: Configure kernel # 配置内核
         run: |
           cd kernel_workspace/kernel_platform
           # Add KSU configuration settings
           echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KPM=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-          # Add VFS configuration settings
-          if [[ "${{ github.event.inputs.VFS_patch_ENABLED }}" == 'enable' ]]; then
-            echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./common/arch/arm64/configs/gki_defconfig
-            echo "CONFIG_KSU_MANUAL_HOOK=y" >> ./common/arch/arm64/configs/gki_defconfig
-          else
-            echo "CONFIG_KSU_SUSFS_SUS_SU=y" >> ./common/arch/arm64/configs/gki_defconfig
-          fi
-
-          # Add SUSFS configuration settings
+          echo "CONFIG_KSU_SUSFS_SUS_SU=${{ github.event.inputs.VFS_patch_ENABLED == 'enable' && 'n' || 'y' }}" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_MANUAL_HOOK=${{ github.event.inputs.VFS_patch_ENABLED == 'enable' && 'y' || 'n' }}" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -202,7 +173,7 @@ jobs:
           # Remove check_defconfig
           sed -i 's/check_defconfig//' ./common/build.config.gki
 
-      - name: Add make name
+      - name: Set kernel name # 设置内核名称
         run: |
           cd kernel_workspace/kernel_platform
           if [[ "${{ github.event.inputs.CPU }}" == "sm8650" || "${{ github.event.inputs.CPU }}" == "sm8750" ]]; then
@@ -210,67 +181,53 @@ jobs:
           fi
           sed -i '$s|echo "\$res"|echo "\${{ github.event.inputs.KERNEL_NAME }}"|' ./common/scripts/setlocalversion
 
-      - name: Build kernel
+      - name: Build kernel # 构建内核
         run: |
           cd kernel_workspace
-          if [[ "${{ github.event.inputs.CPU }}" == "sm8650" || "${{ github.event.inputs.CPU }}" == "sm8750" ]]; then
+          if [[ "${{ github.event.inputs.CPU }}" == "sm8650" ]]; then
             ./kernel_platform/build_with_bazel.py -t ${{ github.event.inputs.CPUD }} gki --action_env=KSU_VERSION
+          elif [[ "${{ github.event.inputs.CPU }}" == "sm8750" ]]; then
+            ./kernel_platform/oplus/build/oplus_build_kernel.sh ${{ github.event.inputs.CPUD }} perf --action_env=KSU_VERSION
           else
             LTO=thin ./kernel_platform/oplus/build/oplus_build_kernel.sh ${{ github.event.inputs.CPUD }} gki
           fi
 
-      - name: Make AnyKernel3
+      - name: Make AnyKernel3 # 制作 AnyKernel3
         run: |
-          git clone https://github.com/Kernel-SU/AnyKernel3 --depth=1
-          rm -rf ./AnyKernel3-KernelSU-Next/.git
-          dir1="./kernel_workspace/kernel_platform/out/msm-kernel-${{ github.event.inputs.CPUD }}-gki/dist/"
-          dir2="./kernel_workspace/kernel_platform/common/out/arch/arm64/boot/"
-          dir3="./kernel_workspace/kernel_platform/out/msm-${{ github.event.inputs.CPUD }}-${{ github.event.inputs.CPUD }}-gki/dist/"
-
-          if find "$dir1" -name "Image" | grep -q "Image"; then
-            image_path="$dir1"Image
-          elif find "$dir2" -name "Image" | grep -q "Image"; then
-            image_path="$dir2"Image
-          elif find "$dir3" -name "Image" | grep -q "Image"; then
-            image_path="$dir3"Image
-          else
-            image_path=$(find "./kernel_workspace/kernel_platform/common/out/" -name "Image" | head -n 1)
-          fi
-
+          git clone https://github.com/Kernel-SU/AnyKernel3 --depth=1 && rm -rf ./AnyKernel3-KernelSU-Next/.git
+          DIR1="./kernel_workspace/kernel_platform/out/msm-kernel-${{ github.event.inputs.CPUD }}-gki/dist/"
+          DIR2="./kernel_workspace/kernel_platform/common/out/arch/arm64/boot/"
+          DIR3="./kernel_workspace/kernel_platform/out/msm-${{ github.event.inputs.CPUD }}-${{ github.event.inputs.CPUD }}-gki/dist/"
+          image_path=$(find "$DIR1" "$DIR2" "$DIR3" -name "Image" | head -n 1)
           if [ -n "$image_path" ] && [ -f "$image_path" ]; then
-            mkdir -p "$dir1"
-            if [ "$(realpath "$image_path")" != "$(realpath "$dir1"Image)" ]; then
-              cp "$image_path" "$dir1"
-            else
-              echo "源文件与目标相同，跳过复制"
-            fi
+            mkdir -p "$DIR1" && cp "$image_path" "$DIR1"Image
           else
             echo "未找到 Image 文件，构建可能失败"
             exit 1
           fi
 
-      - name: Apply patch_linux and replace Image
+      - name: Apply patch_linux and replace Image # 应用 patch_linux 并替换 Image
         run: |
-          anykernel_dir="./AnyKernel3-KernelSU-Next/"
-          image_dir="./kernel_workspace/kernel"
+          ANYKERNEL_DIR="./AnyKernel3-KernelSU-Next/"
+          IMAGE_DIR="./kernel_workspace/kernel"
 
           cd kernel_workspace/kernel_platform/out/msm-kernel-${{ github.event.inputs.CPUD }}-gki/dist
           curl -LO https://github.com/ShirkNeko/SukiSU_KernelPatch_patch/releases/download/0.11-beta/patch_linux
           chmod +x patch_linux
           ./patch_linux
-          cp oImage -t "$anykernel_dir" -t "$image_dir" Image
+          cp oImage -t $ANYKERNEL_DIR -t $IMAGE_DIR Image
 
-      - name: Get current date
+      - name: Get current date # 获取当前时间
         id: formatted_date
         run: echo "formatted=$(date +'%Y-%m-%d_%H-%M-%S')" >> $GITHUB_OUTPUT
 
-      - name: Upload AnyKernel3
+      - name: Upload AnyKernel3 # 上传 AnyKernel3
         uses: actions/upload-artifact@v4
         with:
           name: AnyKernel3_SukiSU_${{ env.KSUVER }}_${{ github.event.inputs.FEIL }}_$(date +'%Y-%m-%d_%H-%M-%S')
           path: ./AnyKernel3-KernelSU-Next/*
 
-      - name: Upload Image
+      - name: Upload Image # 上传 Image
         uses: actions/upload-artifact@v4
         with:
           name: Image_KernelSU_${{ env.KSUVER }}_${{ github.event.inputs.FEIL }}_$(date +'%Y-%m-%d_%H-%M-%S')
